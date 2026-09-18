@@ -31,6 +31,7 @@ local ids = {}
 
 local retry_url = false
 local context = {}
+local warc_digests = {}
 
 local high_quality = {}
 for item in io.lines("high-quality.txt") do
@@ -147,6 +148,26 @@ find_item = function(url)
   end
 end
 
+finish_item = function()
+  if item_name then
+    local video_archived = false
+    for url, checked in pairs(context["digests"]) do
+      if checked ~= true and not warc_digests[checked] then
+        error("WARC digest does not match downloaded data.")
+      end
+      if string.match(string.lower(url) .. "?", "^https?://[^%?]+%.ts%?") then
+        video_archived = true
+      end
+    end
+    if item_type == "video"
+      and not abortgrab
+      and not context["missing"]
+      and not video_archived then
+      error("No video archived.")
+    end
+  end
+end
+
 set_item = function(url)
   if ids[string.lower(url)] then
     return nil
@@ -157,11 +178,11 @@ set_item = function(url)
     local new_item_value = found["value"]
     local new_item_name = percent_encode_url(new_item_type .. ":" .. new_item_value)
     if new_item_name ~= item_name then
+      finish_item()
       ids = {}
       context = {
         ["api_urls"]={},
-        ["digests"]={},
-        ["warc_digests"]={}
+        ["digests"]={}
       }
       item_value = new_item_value
       item_type = new_item_type
@@ -932,30 +953,25 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
             .. "&sourceReferer=share"
           )
         force_check("https://me2do.naver.com/common/requestJsonpV2?_callback=window.spi_0&svcCode=0022&url=" .. escape_share(share_url) .. "&")
-        local newurl = "https://creatorhub-api.naver.com/api/v7.0/clipviewer/card"
+        check(
+          "https://creatorhub-api.naver.com/api/v7.0/clipviewer/card"
           .. "?userInteraction=true"
           .. "&seedType=PERSONAL"
           .. "&serviceType=NAVER_TV"
           .. "&seedMediaId=" .. video_id
           .. "&mediaType=" .. media_type
-        for _, parameter in ipairs({
-          {"panelType", query["panelType"]},
-          {"referer", query["entryPoint"] or ""},
-          {"recType", query["recType"] or "AIRS"},
-          {"recId", query["recId"]},
-          {"enableReverse", query["enableReverse"] or "false"},
-          {"adAllowed", "false"},
-          {"clickNsc", query["clickNsc"]},
-          {"clickArea", query["clickArea"]},
-          {"recentWatchedHistory", (query["recType"] or "AIRS") == "AIRS" and "" or nil},
-          {"deviceType", "html5_mo"},
-          {"profileOverride", query["embed"] == "true" and "false" or nil}
-        }) do
-          if parameter[2] then
-            newurl = newurl .. "&" .. parameter[1] .. "=" .. parameter[2]
-          end
-        end
-        check(newurl)
+          .. (query["panelType"] and "&panelType=" .. query["panelType"] or "")
+          .. "&referer=" .. (query["entryPoint"] or "")
+          .. "&recType=" .. (query["recType"] or "AIRS")
+          .. (query["recId"] and "&recId=" .. query["recId"] or "")
+          .. "&enableReverse=" .. (query["enableReverse"] or "false")
+          .. "&adAllowed=false"
+          .. (query["clickNsc"] and "&clickNsc=" .. query["clickNsc"] or "")
+          .. (query["clickArea"] and "&clickArea=" .. query["clickArea"] or "")
+          .. ((query["recType"] or "AIRS") == "AIRS" and "&recentWatchedHistory=" or "")
+          .. "&deviceType=html5_mo"
+          .. (query["embed"] == "true" and "&profileOverride=false" or "")
+        )
         check("https://clip-viewer.naver.com/oembed/?seedMediaId=" .. video_id .. "&mediaType=" .. media_type .. "&serviceType=NTV")
       elseif string.match(url, "^https?://clip%-viewer%.naver%.com/oembed/%?")
         or string.match(url, "^https?://m%.naver%.com/shorts/oembed/%?") then
@@ -1053,7 +1069,7 @@ wget.callbacks.dedup_response = function(url, digest)
       error("WARC digest does not match downloaded data.")
     end
     context["digests"][url] = true
-    context["warc_digests"][digest] = true
+    warc_digests[digest] = true
   end
 end
 
@@ -1291,20 +1307,7 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
 end
 
 wget.callbacks.finish = function(start_time, end_time, wall_time, numurls, total_downloaded_bytes, total_download_time)
-  local video_archived = false
-  for url, checked in pairs(context["digests"]) do
-    if checked ~= true and not context["warc_digests"][checked] then
-      error("WARC digest does not match downloaded data.")
-    end
-    if string.match(string.lower(url) .. "?", "^https?://[^%?]+%.ts%?") then
-      video_archived = true
-    end
-  end
-  if item_type == "video"
-    and not context["missing"]
-    and not video_archived then
-    error("No video archived.")
-  end
+  finish_item()
   local function submit_backfeed(items, key)
     local tries = 0
     local maxtries = 5
