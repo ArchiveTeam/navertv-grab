@@ -635,23 +635,6 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
         context["high_quality"] = high_quality[item_name]
           or high_quality["channel:" .. string.lower(json["channel"]["channelId"])]
           or high_quality["channel:" .. string.lower(json["channel"]["displayChannelId"])]
-        for _, channel in pairs({
-          "tvnjoy",
-          "tvndrama0",
-          "yonhapnews",
-          "channelanews",
-          "yonhapnewstv",
-          "tvchosunnews",
-          "ytnnews24",
-          "kbsnews",
-          "sbsnews8",
-          "imnews",
-          "jtbcnews"
-        }) do
-          if json["channel"]["channelId"] == channel then
-            error("Ignored channel " .. channel .. ".")
-          end
-        end
         ids[string.lower(json["clip"]["videoId"])] = true
         if type(json["clip"]["shareUrl"]) == "string" and string.match(json["clip"]["shareUrl"], "^https?://naver%.me/") then
           force_check(json["clip"]["shareUrl"])
@@ -1132,9 +1115,31 @@ wget.callbacks.write_to_warc = function(url, http_stat)
         return false
       end
     elseif string.match(url["url"], "^https?://apis%.naver%.com/now_web2/now_web_api/") then
-      if cjson.decode(read_file(http_stat["local_file"]))["statusCode"] ~= "SUCCESS" then
+      local json = cjson.decode(read_file(http_stat["local_file"]))
+      if json["statusCode"] ~= "SUCCESS" then
         retry_url = true
         return false
+      end
+      if string.match(url["url"], "/clips/[0-9]+/play%-info%?") then
+        for _, channel in pairs({
+          "tvnjoy",
+          "tvndrama0",
+          "yonhapnews",
+          "channelanews",
+          "yonhapnewstv",
+          "tvchosunnews",
+          "ytnnews24",
+          "kbsnews",
+          "sbsnews8",
+          "imnews",
+          "jtbcnews"
+        }) do
+          if json["result"]["channel"]["channelId"] == channel then
+            print("Ignored channel " .. channel .. ".")
+            abort_item()
+            return false
+          end
+        end
       end
     elseif string.match(url["url"], "^https?://creatorhub%-api%.naver%.com/api/v7%.0/clipviewer/card%?") then
       local json = cjson.decode(read_file(http_stat["local_file"]))
