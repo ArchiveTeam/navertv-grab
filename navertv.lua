@@ -202,7 +202,14 @@ allowed = function(url)
 
   if string.match(lower .. "?", "^https?://[^%?]+%.gif%?")
     or string.match(lower .. "?", "^https?://[^%?]+/trailer/[^%?]+%.mp4%?")
-    or string.match(lower .. "?", "^https?://[^%?]+/favicon%.ico%?") then
+    or string.match(lower .. "?", "^https?://[^%?]+/favicon%.ico%?")
+    or string.match(lower, "^https?://nid%.naver%.com/nidlogin%.login") then
+    return false
+  end
+
+  if string.match(lower, "^https?://blog%.naver%.com/")
+    or string.match(lower, "^https?://[^/]+%.blog%.naver%.com/") then
+    discover_item(discovered_outlinks, string.match(percent_encode_url(url), "^([^%s]+)"))
     return false
   end
 
