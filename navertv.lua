@@ -447,6 +447,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     if type(value) == "table" then
       if item_type == "video" and value["clip"] and value["play"]
         and tostring(value["clip"]["clipNo"]) == item_value then
+        ids[string.lower(value["clip"]["videoId"])] = true
         check("https://play.rmcnmv.naver.com/vod/play/v2.0/" .. value["clip"]["videoId"] .. "?key=" .. urlparse.escape(value["play"]["inKey"]))
         check(
           "https://apis.naver.com/neonplayer/vodplay/v3/playback/" .. value["clip"]["videoId"]
@@ -607,12 +608,21 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
     end
   end
 
+  if item_type == "video"
+    and string.match(url, "^https?://tv%.naver%.com/v/([0-9]+)/*$") == item_value
+    and not context["api_urls"]["https://apis.naver.com/now_web2/now_web_api/v1/clips/" .. item_value .. "/play-info"] then
+    context["html"] = read_file(file)
+    check_api("/clips/" .. item_value .. "/play-info")
+    return urls
+  end
+
   if status_code == 404
     and string.match(url, "^https?://apis%.naver%.com/now_web2/now_web_api/v1/clips/[0-9]+/play%-info%?") then
     check("https://tv.naver.com/v/" .. item_value)
+    html = context["html"]
   end
 
-  if allowed(url) and status_code < 300 then
+  if allowed(url) and (status_code < 300 or html) then
     local resource = string.match(url, "^https?://resources%-rmcnmv%.pstatic%.net/(navertv/[^#]+)")
       or string.match(url, "^https?://resources%-rmcnmv%.akamaized%.net/(navertv/[^#]+)")
     if resource and (
@@ -633,16 +643,16 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
         check(json["playerUrl"])
         check(json["author_url"])
       end
-    elseif string.match(url, "^https?://apis%.naver%.com/now_web2/now_web_api/") then
+    elseif status_code < 300 and string.match(url, "^https?://apis%.naver%.com/now_web2/now_web_api/") then
       json = cjson.decode(read_file(file))["result"]
       if string.match(url, "/clips/[0-9]+/play%-info%?") then
+        context["api_urls"]["https://apis.naver.com/now_web2/now_web_api/v1/clips/" .. item_value .. "/play-info"] = url
         if tostring(json["clip"]["clipNo"]) ~= item_value then
           error("Inconsistent video data.")
         end
         context["high_quality"] = high_quality[item_name]
           or high_quality["channel:" .. string.lower(json["channel"]["channelId"])]
           or high_quality["channel:" .. string.lower(json["channel"]["displayChannelId"])]
-        ids[string.lower(json["clip"]["videoId"])] = true
         if type(json["clip"]["shareUrl"]) == "string" and string.match(json["clip"]["shareUrl"], "^https?://naver%.me/") then
           force_check(json["clip"]["shareUrl"])
         end
@@ -904,8 +914,15 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       end
     elseif string.match(url, "^https?://tv%.naver%.com/_next/data/") then
       scan_json(cjson.decode(read_file(file)))
-    elseif string.match(content_type, "^text/html") then
-      html = read_file(file)
+    end
+
+    if string.match(url, "^https?://apis%.naver%.com/now_web2/now_web_api/v1/clips/[0-9]+/play%-info%?") then
+      html = context["html"]
+      context["html"] = nil
+      url = "https://tv.naver.com/v/" .. item_value
+    end
+    if html or string.match(content_type, "^text/html") then
+      html = html or read_file(file)
       if string.match(url, "^https?://link%.naver%.com/bridge%?") then
         check(urlparse.unescape(string.match(url, "[%?&]url=([^&]+)")))
       elseif string.match(url, "^https?://m%.naver%.com//?shorts/%?") then
@@ -1078,6 +1095,11 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     error("No item name found.")
   end
 
+  if abortgrab then
+    print("Not writing to WARC.")
+    return false
+  end
+
   if http_stat["res"] < 0 then
     return false
   end
@@ -1086,6 +1108,7 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     status_code == 200
     or status_code == 302
     or status_code == 307
+    or (status_code == 404 and item_type == "media")
     or (
       status_code == 404
       and string.match(url["url"], "^https?://apis%.naver%.com/now_web2/now_web_api/v1/clips/[0-9]+/play%-info%?")
@@ -1225,10 +1248,6 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     end
   end
 
-  if abortgrab then
-    print("Not writing to WARC.")
-    return false
-  end
   retry_url = false
   tries = 0
   return true
@@ -1293,6 +1312,13 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
   if newloc then
     if string.match(newloc, "^https?://[^/]+$") then
       newloc = newloc .. "/"
+    end
+    if item_type == "video"
+      and string.match(url["url"], "^https?://tv%.naver%.com/v/([0-9]+)/*$") == item_value
+      and string.match(newloc, "^https?://m%.naver%.com/shorts/%?") then
+      print("Ignoring migrated video.")
+      abort_item()
+      return wget.actions.EXIT
     end
     if not find_item(newloc) and (
       string.match(newloc, "^https?://clip%.naver%.com/")

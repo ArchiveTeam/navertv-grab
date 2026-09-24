@@ -72,7 +72,7 @@ if not WGET_AT:
 #
 # Update this each time you make a non-cosmetic change.
 # It will be added to the WARC files and reported to the tracker.
-VERSION = '20260923.01'
+VERSION = '20260924.01'
 TRACKER_ID = 'navertv'
 TRACKER_HOST = 'legacy-api.arpa.li'
 MULTI_ITEM_SIZE = 100
@@ -378,7 +378,7 @@ class WgetArgs(object):
             item_type, item_value = item_name.split(':', 1)
             if item_type == 'video':
                 wget_args.extend(['--warc-header', 'navertv-video: '+item_value])
-                wget_args.append('https://apis.naver.com/now_web2/now_web_api/v1/clips/'+quote(item_value)+'/play-info')
+                wget_args.append('https://tv.naver.com/v/'+quote(item_value))
             elif item_type == 'channel':
                 wget_args.extend(['--warc-header', 'navertv-channel: '+item_value])
                 wget_args.append('https://apis.naver.com/now_web2/now_web_api/v1/channel/'+quote(unquote(item_value))+'/info')
@@ -393,7 +393,7 @@ class WgetArgs(object):
                 wget_args.append('https://'+item_value)
             else:
                 raise Exception('Unknown item')
-            if item_type != 'media':
+            if item_type not in ('video', 'media'):
                 msgpad = str(int(time.time()*1000))
                 md = str(base64.b64encode(hmac.new(
                     b'nbxvs5nwNG9QKEWK0ADjYA4JZoujF4gHcIwvoCxFTPAeamq5eemvt5IWAYXxrbYM',
