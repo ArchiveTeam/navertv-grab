@@ -160,6 +160,7 @@ finish_item = function()
       end
     end
     if item_type == "video"
+      and context["high_quality"]
       and not abortgrab
       and not context["missing"]
       and not video_archived then
@@ -213,14 +214,23 @@ allowed = function(url)
     return false
   end
 
-  if ids[lower] then
-    return true
+  if (
+    (not context["high_quality"] or not ids[lower])
+    and (
+      string.match(lower .. "?", "^https?://[^%?]+%.mp4%?")
+      or string.match(lower .. "?", "^https?://[^%?]+%.m3u8%?")
+      or string.match(lower .. "?", "^https?://[^%?]+%.mpd%?")
+      or string.match(lower .. "?", "^https?://[^%?]+%.ts%?")
+    )
+  ) or (
+    not context["high_quality"]
+    and string.match(lower, "^https?://apis%.naver%.com/neonplayer/vodplay/v3/playback/")
+  ) then
+    return false
   end
 
-  if string.match(lower .. "?", "^https?://[^%?]+%.mp4%?")
-    or string.match(lower .. "?", "^https?://[^%?]+%.m3u8%?")
-    or string.match(lower .. "?", "^https?://[^%?]+%.ts%?") then
-    return false
+  if ids[lower] then
+    return true
   end
 
   for _, path in pairs({
@@ -518,6 +528,9 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
 
   local function check_video(videos)
+    if not context["high_quality"] then
+      return nil
+    end
     local selected = nil
     local current_height = nil
     local target_height = 270
