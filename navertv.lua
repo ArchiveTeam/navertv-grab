@@ -622,6 +622,7 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
   end
 
   if item_type == "video"
+    and status_code == 200
     and string.match(url, "^https?://tv%.naver%.com/v/([0-9]+)/*$") == item_value
     and not context["api_urls"]["https://apis.naver.com/now_web2/now_web_api/v1/clips/" .. item_value .. "/play-info"] then
     context["html"] = read_file(file)
@@ -786,9 +787,11 @@ wget.callbacks.get_urls = function(file, url, is_css, iri)
       end
     elseif string.match(url, "^https?://creatorhub%-api%.naver%.com/api/v7%.0/clipviewer/card%?") then
       json = cjson.decode(read_file(file))["body"]["card"]["content"]
-      local videos = {}
-      scan_mpd(json["vod"]["playback"], videos)
-      check_video(videos)
+      if type(json["vod"]) == "table" and type(json["vod"]["playback"]) == "table" then
+        local videos = {}
+        scan_mpd(json["vod"]["playback"], videos)
+        check_video(videos)
+      end
       check(json["endUrl"])
       check(json["mobileEndUrl"])
       check(json["contentWebModalUrl"])
@@ -1125,7 +1128,6 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     or (
       status_code == 404
       and string.match(url["url"], "^https?://apis%.naver%.com/now_web2/now_web_api/v1/clips/[0-9]+/play%-info%?")
-      and cjson.decode(read_file(http_stat["local_file"]))["statusCode"] == "CLIP_NOT_FOUND"
     )
   ) then
     retry_url = true
@@ -1186,9 +1188,17 @@ wget.callbacks.write_to_warc = function(url, http_stat)
       end
     elseif string.match(url["url"], "^https?://creatorhub%-api%.naver%.com/api/v7%.0/clipviewer/card%?") then
       local json = cjson.decode(read_file(http_stat["local_file"]))
-      if json["header"]["code"] ~= 0
-        or json["body"]["card"]["content"]["serviceType"] ~= "NTV"
-        or tostring(json["body"]["card"]["content"]["contentId"]) ~= item_value then
+      if json["header"]["code"] ~= 0 then
+        retry_url = true
+        return false
+      end
+      json = json["body"]["card"]["content"]
+      if json["serviceType"] ~= "NTV"
+        or tostring(json["contentId"]) ~= item_value
+        or not (
+          (type(json["vod"]) == "table" and type(json["vod"]["playback"]) == "table")
+          or (type(json["error"]) == "table" and json["error"]["errorCode"] == "COUNTRY_LOCK")
+        ) then
         retry_url = true
         return false
       end
@@ -1251,6 +1261,13 @@ wget.callbacks.write_to_warc = function(url, http_stat)
     end
     context["digests"][url["url"]] = "sha1:" .. basexx.to_base32(sha1)
   elseif status_code == 404 then
+    if item_type ~= "media" then
+      local json = cjson.decode(read_file(http_stat["local_file"]))
+      if json["statusCode"] ~= "CLIP_NOT_FOUND" and json["statusCode"] ~= "CLIP_ETC" then
+        retry_url = true
+        return false
+      end
+    end
     context["missing"] = true
   end
 
@@ -1330,7 +1347,6 @@ wget.callbacks.httploop_result = function(url, err, http_stat)
       and string.match(url["url"], "^https?://tv%.naver%.com/v/([0-9]+)/*$") == item_value
       and string.match(newloc, "^https?://m%.naver%.com/shorts/%?") then
       print("Ignoring migrated video.")
-      abort_item()
       return wget.actions.EXIT
     end
     if not find_item(newloc) and (
